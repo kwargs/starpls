@@ -163,3 +163,96 @@ pub(crate) fn signature_help(
         }],
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect;
+    use expect_test::Expect;
+
+    use crate::test_util::custom_analysis_from_single_file;
+    use crate::FilePosition;
+
+    fn check_custom_signature_help(fixture: &str, expect: Expect) {
+        let (analysis, fixture) = custom_analysis_from_single_file(fixture);
+        let help = analysis
+            .snapshot()
+            .signature_help(
+                fixture
+                    .cursor_pos
+                    .map(|(file_id, pos)| FilePosition { file_id, pos })
+                    .unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+
+        expect.assert_debug_eq(&help);
+    }
+
+    #[test]
+    fn test_custom_global_function_signature_help() {
+        check_custom_signature_help(
+            r#"
+make_document($0)
+"#,
+            expect![[r#"
+                SignatureHelp {
+                    signatures: [
+                        SignatureInfo {
+                            label: "def make_document(title: string) -> example.Document",
+                            documentation: Some(
+                                "Creates a document.  ",
+                            ),
+                            parameters: Some(
+                                [
+                                    ParameterInfo {
+                                        label: "title: string",
+                                        documentation: Some(
+                                            "Document title.  ",
+                                        ),
+                                    },
+                                ],
+                            ),
+                            active_parameter: Some(
+                                0,
+                            ),
+                        },
+                    ],
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_custom_method_signature_help() {
+        check_custom_signature_help(
+            r#"
+runtime.decode($0)
+"#,
+            expect![[r#"
+                SignatureHelp {
+                    signatures: [
+                        SignatureInfo {
+                            label: "def decode(payload: string) -> example.Document",
+                            documentation: Some(
+                                "Decodes a payload.  ",
+                            ),
+                            parameters: Some(
+                                [
+                                    ParameterInfo {
+                                        label: "payload: string",
+                                        documentation: Some(
+                                            "Serialized payload.  ",
+                                        ),
+                                    },
+                                ],
+                            ),
+                            active_parameter: Some(
+                                0,
+                            ),
+                        },
+                    ],
+                }
+            "#]],
+        );
+    }
+}

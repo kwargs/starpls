@@ -52,6 +52,8 @@ mod line_index;
 mod show_hir;
 mod show_syntax_tree;
 mod signature_help;
+#[cfg(test)]
+mod test_util;
 mod util;
 
 pub type Cancellable<T> = Result<T, Cancelled>;

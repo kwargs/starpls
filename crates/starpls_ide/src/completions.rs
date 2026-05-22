@@ -585,6 +585,7 @@ mod tests {
     use starpls_hir::Db;
 
     use crate::completions::CompletionRelevance;
+    use crate::test_util::custom_analysis_from_single_file;
     use crate::Analysis;
     use crate::CompletionItemKind;
     use crate::FilePosition;
@@ -632,6 +633,36 @@ mod tests {
                     || (item.relevance != CompletionRelevance::Builtin
                         && item.kind != CompletionItemKind::Keyword)
             })
+            .collect::<Vec<_>>();
+        completions.sort_by(|item1, item2| item1.label.cmp(&item2.label));
+
+        let expected = completions
+            .into_iter()
+            .fold(String::new(), |mut acc, item| {
+                writeln!(acc, "{:?}", item).unwrap();
+                acc
+            });
+
+        expect.assert_eq(&expected);
+    }
+
+    fn check_custom_completions(fixture: &str, labels: &[&str], expect: Expect) {
+        let (analysis, fixture) = custom_analysis_from_single_file(fixture);
+        let completions = analysis
+            .snapshot()
+            .completions(
+                fixture
+                    .cursor_pos
+                    .map(|(file_id, pos)| FilePosition { file_id, pos })
+                    .unwrap(),
+                Some("".to_string()),
+            )
+            .unwrap()
+            .unwrap();
+
+        let mut completions = completions
+            .into_iter()
+            .filter(|item| labels.contains(&item.label.as_str()))
             .collect::<Vec<_>>();
         completions.sort_by(|item1, item2| item1.label.cmp(&item2.label));
 
@@ -764,6 +795,48 @@ foo.$0
             expect![[r#"
                 CompletionItem { label: "x", kind: Field, mode: None, filter_text: None, relevance: VariableOrKeyword }
                 CompletionItem { label: "y", kind: Field, mode: None, filter_text: None, relevance: VariableOrKeyword }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_custom_global_completions() {
+        check_custom_completions(
+            r#"
+$0
+"#,
+            &["make_document", "runtime"],
+            expect![[r#"
+                CompletionItem { label: "make_document", kind: Function, mode: None, filter_text: None, relevance: Builtin }
+                CompletionItem { label: "runtime", kind: Module, mode: None, filter_text: None, relevance: Builtin }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_custom_namespace_completion() {
+        check_custom_completions(
+            r#"
+runtime.$0
+"#,
+            &["decode"],
+            expect![[r#"
+                CompletionItem { label: "decode", kind: Function, mode: None, filter_text: None, relevance: VariableOrKeyword }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_custom_dotted_type_field_completion() {
+        check_custom_completions(
+            r#"
+def render(req):
+    # type: (example.Request) -> Unknown
+    req.$0
+"#,
+            &["metadata"],
+            expect![[r#"
+                CompletionItem { label: "metadata", kind: Field, mode: None, filter_text: None, relevance: VariableOrKeyword }
             "#]],
         );
     }

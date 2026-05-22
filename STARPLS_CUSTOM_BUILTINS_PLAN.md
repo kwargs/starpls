@@ -142,6 +142,8 @@ model so `starpls` can deserialize it into the same internal representation.
 
 ### 1. Add Custom Builtins JSON Loading
 
+Status: done in `2da269f`.
+
 Add a parser for a JSON representation close to `starpls_bazel::Builtins`.
 This should be independent from LSP server startup so it can be unit-tested and
 reused by `starpls check`.
@@ -161,6 +163,8 @@ Good first MR shape:
 
 ### 2. Add Manifest Discovery
 
+Status: done in `72eb789`.
+
 Add repo-local discovery for `.starpls.json`.
 
 Suggested behavior:
@@ -176,6 +180,8 @@ This mirrors the existing `starpls` style of discovering repo-local metadata
 while making the mechanism generic.
 
 ### 3. Route Files To Custom Schemas
+
+Status: done in `bc58381`.
 
 Extend file metadata so a Starlark file can carry a custom schema.
 
@@ -201,6 +207,8 @@ files only, leaving Bazel files on their normal Bazel builtin path.
 
 ### 4. Store Custom Builtins Separately
 
+Status: done in `bc58381`.
+
 The existing builtin definitions are keyed by dialect. Add a separate custom
 schema store keyed by canonical manifest path plus schema name.
 
@@ -213,6 +221,8 @@ The resolver should check `FileInfo::Custom { schema }`, where `schema` is this
 unique schema id, and expose the matching custom globals/types for that file.
 
 ### 5. Make Custom Builtins Visible In Standard Files
+
+Status: done in `bc58381`.
 
 Update name resolution so Standard-dialect files with a custom schema see that
 schema's globals.
@@ -227,6 +237,8 @@ This is the core upstream-worthy behavior: custom runtime environments can
 describe their predeclared globals without editor-specific configuration.
 
 ### 6. Support Dotted Builtin Type Names
+
+Status: done in `bc58381`.
 
 Custom schemas should be able to name types like `example.Request`. Type
 comments and schema return types should resolve the same name.
@@ -248,22 +260,27 @@ Implementation note:
 
 ### 7. Make `starpls check` Use The Same Mechanism
 
+Status: done in `bc58381`.
+
 The CLI checker should load the same manifests and schemas as the LSP server.
 Otherwise diagnostics in the editor and in `starpls check` will disagree.
 
 ### 8. Add Upstream-friendly Tests
 
+Status: done. Core coverage landed in `bc58381`; the current working tree adds
+the remaining IDE-facing completion and signature help coverage.
+
 Use a small generic fixture such as `example.starpls.json`.
 
 Coverage targets:
 
-- Manifest discovery and include matching.
-- Custom global visible in a `.star` file.
-- Namespace object completion, for example `runtime.` -> `decode`.
-- Function signature help for custom builtin functions.
-- Type comment with a dotted custom type.
-- Field completion through a custom type, for example `req.` -> `metadata`.
-- Negative case where a `.star` file outside `include` does not receive the
+- [x] Manifest discovery and include matching.
+- [x] Custom global visible in a `.star` file.
+- [x] Namespace object completion, for example `runtime.` -> `decode`.
+- [x] Function signature help for custom builtin functions.
+- [x] Type comment with a dotted custom type.
+- [x] Field completion through a custom type, for example `req.` -> `metadata`.
+- [x] Negative case where a `.star` file outside `include` does not receive the
   custom schema.
 
 ## Proposed Upstream MR Split
