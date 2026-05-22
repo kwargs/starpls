@@ -12,6 +12,7 @@ use anyhow::bail;
 use crossbeam_channel::Sender;
 use dashmap::DashMap;
 use indexmap::IndexSet;
+use log::error;
 use parking_lot::RwLock;
 use rustc_hash::FxHasher;
 use starpls_bazel::client::BazelClient;
@@ -30,6 +31,7 @@ use starpls_common::ResolvedPath;
 use starpls_ide::FileLoader;
 use starpls_ide::LoadFileResult;
 
+use crate::custom_builtins::discover_custom_schema;
 use crate::event_loop::FetchExternalRepoRequest;
 use crate::event_loop::Task;
 
@@ -107,7 +109,7 @@ impl DocumentManager {
     pub(crate) fn open(&mut self, path: PathBuf, version: i32, contents: String) {
         // Create/update the document with the given contents.
         self.has_closed_or_opened_documents = true;
-        let (dialect, info) =
+        let (dialect, mut info) =
             match dialect_and_api_context_for_workspace_path(&self.workspace, &path) {
                 Some((dialect, api_context)) => (
                     dialect,
@@ -118,6 +120,21 @@ impl DocumentManager {
                 ),
                 None => return,
             };
+        if dialect == Dialect::Standard {
+            match discover_custom_schema(&path) {
+                Ok(Some(schema_match)) => {
+                    info = Some(FileInfo::Custom {
+                        schema: schema_match.schema_id,
+                    });
+                }
+                Ok(None) => {}
+                Err(err) => error!(
+                    "failed to discover custom builtins schema for {}: {}",
+                    path.display(),
+                    err
+                ),
+            }
+        }
         let file_id = self.path_interner.intern_path(path);
         self.documents.insert(
             file_id,
@@ -449,7 +466,22 @@ impl FileLoader for DefaultFileLoader {
                 assert!(from_path.pop());
 
                 // Resolve the given path relative to the importing file's directory.
-                (from_path.join(path).canonicalize()?, None, None)
+                let path = from_path.join(path).canonicalize()?;
+                let info = match discover_custom_schema(&path) {
+                    Ok(Some(schema_match)) => Some(FileInfo::Custom {
+                        schema: schema_match.schema_id,
+                    }),
+                    Ok(None) => None,
+                    Err(err) => {
+                        error!(
+                            "failed to discover custom builtins schema for {}: {}",
+                            path.display(),
+                            err
+                        );
+                        None
+                    }
+                };
+                (path, info, None)
             }
             Dialect::Bazel => {
                 // Parse the load path as a Bazel label.

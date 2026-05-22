@@ -107,6 +107,9 @@ pub enum FileInfo {
         api_context: APIContext,
         is_external: bool,
     },
+    Custom {
+        schema: String,
+    },
 }
 
 #[salsa::input]
@@ -120,14 +123,23 @@ pub struct File {
 
 impl File {
     pub fn api_context(&self, db: &dyn Db) -> Option<APIContext> {
-        self.info(db).map(|data| match data {
-            FileInfo::Bazel { api_context, .. } => api_context,
+        self.info(db).and_then(|data| match data {
+            FileInfo::Bazel { api_context, .. } => Some(api_context),
+            FileInfo::Custom { .. } => None,
         })
     }
 
     pub fn is_external(&self, db: &dyn Db) -> Option<bool> {
-        self.info(db).map(|data| match data {
-            FileInfo::Bazel { is_external, .. } => is_external,
+        self.info(db).and_then(|data| match data {
+            FileInfo::Bazel { is_external, .. } => Some(is_external),
+            FileInfo::Custom { .. } => None,
+        })
+    }
+
+    pub fn custom_schema(&self, db: &dyn Db) -> Option<String> {
+        self.info(db).and_then(|data| match data {
+            FileInfo::Bazel { .. } => None,
+            FileInfo::Custom { schema } => Some(schema),
         })
     }
 }

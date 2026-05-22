@@ -17,6 +17,7 @@ use starpls_bazel::build_language::decode_rules;
 use starpls_bazel::client::BazelCLI;
 use starpls_bazel::client::BazelClient;
 use starpls_bazel::decode_builtins;
+use starpls_bazel::load_custom_builtins;
 use starpls_bazel::APIContext;
 use starpls_bazel::Builtins;
 use starpls_common::Dialect;
@@ -29,6 +30,7 @@ use starpls_ide::InferenceOptions;
 
 use crate::bazel::BazelContext;
 use crate::config::ServerConfig;
+use crate::custom_builtins::discover_custom_schema;
 use crate::debouncer::AnalysisDebouncer;
 use crate::diagnostics::DiagnosticsManager;
 use crate::document::DefaultFileLoader;
@@ -230,6 +232,22 @@ impl Server {
                         prelude_file = Some(file_id)
                     }
 
+                    if let Some(FileInfo::Custom { schema }) = &document.info {
+                        let path = document_manager.lookup_by_file_id(file_id);
+                        match load_custom_builtin_defs(schema, &path) {
+                            Ok(Some(builtins)) => {
+                                self.analysis
+                                    .set_custom_builtin_defs(schema.clone(), builtins);
+                            }
+                            Ok(None) => {}
+                            Err(err) => error!(
+                                "failed to load custom builtins for {}: {}",
+                                path.display(),
+                                err
+                            ),
+                        }
+                    }
+
                     change.create_file(
                         file_id,
                         document.dialect,
@@ -367,6 +385,19 @@ pub(crate) fn load_bazel_builtins() -> Builtins {
 
     // We want to crash if the bundled protobuf file is ever invalid.
     decode_builtins(&data[..]).expect("bug: invalid builtin.pb")
+}
+
+fn load_custom_builtin_defs(
+    schema_id: &str,
+    source_path: &Path,
+) -> anyhow::Result<Option<Builtins>> {
+    let Some(schema_match) = discover_custom_schema(source_path)? else {
+        return Ok(None);
+    };
+    if schema_match.schema_id != schema_id {
+        return Ok(None);
+    }
+    load_custom_builtins(&schema_match.builtins_path).map(Some)
 }
 
 pub(crate) fn load_bazel_build_language(client: &dyn BazelClient) -> anyhow::Result<Builtins> {

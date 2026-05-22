@@ -4,6 +4,7 @@ use std::fmt::Write;
 use expect_test::expect;
 use expect_test::Expect;
 use itertools::Itertools;
+use starpls_bazel::decode_custom_builtins_json;
 use starpls_bazel::APIContext;
 use starpls_common::parse;
 use starpls_common::Db as _;
@@ -179,6 +180,139 @@ fn check_infer_with_options(input: &str, expect: Expect, options: InferenceOptio
         db.gcx().with_tcx(&db, |tcx| {
             tcx.infer_param(file, param);
         });
+    }
+
+    let diagnostics = db.gcx.with_tcx(&db, |tcx| tcx.diagnostics_for_file(file));
+    if !diagnostics.is_empty() {
+        res.push('\n');
+        for diagnostic in diagnostics
+            .into_iter()
+            .sorted_by(|lhs, rhs| lhs.range.range.start().cmp(&rhs.range.range.start()))
+        {
+            writeln!(
+                res,
+                "{:?}..{:?} {}",
+                diagnostic.range.range.start(),
+                diagnostic.range.range.end(),
+                diagnostic.message
+            )
+            .unwrap();
+        }
+    }
+
+    expect.assert_eq(&res);
+}
+
+fn check_custom_infer(input: &str, expect: Expect) {
+    let mut db = TestDatabaseBuilder::default().build();
+    let schema_id = "test-manifest.starpls.json#example".to_string();
+    db.set_custom_builtin_defs(
+        schema_id.clone(),
+        decode_custom_builtins_json(
+            r#"
+            {
+              "global": [
+                {
+                  "name": "make_document",
+                  "callable": {
+                    "params": [],
+                    "return_type": "example.Document"
+                  }
+                },
+                {
+                  "name": "runtime",
+                  "type": "example.runtime"
+                }
+              ],
+              "type": [
+                {
+                  "name": "example.runtime",
+                  "field": [
+                    {
+                      "name": "decode",
+                      "callable": {
+                        "params": [
+                          {
+                            "name": "payload",
+                            "type": "string",
+                            "is_mandatory": true
+                          }
+                        ],
+                        "return_type": "example.Document"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "example.Document",
+                  "field": [
+                    {
+                      "name": "title",
+                      "type": "string"
+                    }
+                  ]
+                },
+                {
+                  "name": "example.Request",
+                  "field": [
+                    {
+                      "name": "metadata",
+                      "type": "example.Metadata"
+                    }
+                  ]
+                },
+                {
+                  "name": "example.Metadata",
+                  "field": [
+                    {
+                      "name": "name",
+                      "type": "string"
+                    }
+                  ]
+                }
+              ]
+            }
+            "#,
+        )
+        .unwrap(),
+    );
+    let file_id = FileId(0);
+    let file = db.create_file(
+        file_id,
+        Dialect::Standard,
+        Some(FileInfo::Custom { schema: schema_id }),
+        input.to_string(),
+    );
+    let root = parse(&db, file).syntax(&db);
+    let source_map = source_map(&db, file);
+    let mut res = String::new();
+
+    for (ptr, range) in source_map
+        .expr_map
+        .keys()
+        .map(|ptr| (ptr, ptr.syntax_node_ptr().text_range()))
+        .sorted_by(|(_, lhs), (_, rhs)| {
+            if lhs.contains_range(*rhs) {
+                Ordering::Greater
+            } else if rhs.contains_range(*lhs) {
+                Ordering::Less
+            } else {
+                lhs.start().cmp(&rhs.start())
+            }
+        })
+    {
+        let expr = *source_map.expr_map.get(ptr).unwrap();
+        let ty = db.gcx().with_tcx(&db, |tcx| tcx.infer_expr(file, expr));
+        let node = ptr.to_node(&root);
+        writeln!(
+            res,
+            "{:?}..{:?} {:?}: {}",
+            range.start(),
+            range.end(),
+            node.syntax().text(),
+            ty.display(&db)
+        )
+        .unwrap();
     }
 
     let diagnostics = db.gcx.with_tcx(&db, |tcx| tcx.diagnostics_for_file(file));
@@ -994,6 +1128,33 @@ res = foo(api.DataInfo())
             143..155 "api.DataInfo": Provider[DataInfo]
             143..157 "api.DataInfo()": DataInfo
             139..158 "foo(api.DataInfo())": DataInfo
+        "#]],
+    );
+}
+
+#[test]
+fn test_custom_builtins_for_standard_file() {
+    check_custom_infer(
+        r#"
+doc = make_document()
+decoded = runtime.decode("payload")
+
+def render(req):
+    # type: (example.Request) -> Unknown
+    return req.metadata.name
+"#,
+        expect![[r#"
+            1..4 "doc": example.Document
+            7..20 "make_document": def make_document() -> example.Document
+            7..22 "make_document()": example.Document
+            23..30 "decoded": example.Document
+            33..40 "runtime": example.runtime
+            33..47 "runtime.decode": def decode(payload: string) -> example.Document
+            48..57 "\"payload\"": Literal["payload"]
+            33..58 "runtime.decode(\"payload\")": example.Document
+            129..132 "req": example.Request
+            129..141 "req.metadata": example.Metadata
+            129..146 "req.metadata.name": string
         "#]],
     );
 }

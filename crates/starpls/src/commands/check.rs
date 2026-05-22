@@ -14,6 +14,7 @@ use anyhow::bail;
 use clap::Args;
 use starpls_bazel::client::BazelCLI;
 use starpls_bazel::client::BazelInfo;
+use starpls_bazel::load_custom_builtins;
 use starpls_common::Diagnostic;
 use starpls_common::Dialect;
 use starpls_common::FileId;
@@ -27,6 +28,7 @@ use walkdir::WalkDir;
 
 use crate::bazel::BazelContext;
 use crate::commands::InferenceOptions;
+use crate::custom_builtins::discover_custom_schema;
 use crate::document::DefaultFileLoader;
 use crate::document::PathInterner;
 use crate::document::{self};
@@ -223,10 +225,21 @@ impl Checker {
 
         let contents = fs::read_to_string(&canonical_path)?;
 
-        let info = api_context.map(|api_context| FileInfo::Bazel {
+        let mut info = api_context.map(|api_context| FileInfo::Bazel {
             api_context,
             is_external: canonical_path.starts_with(&self.bazel_info.output_base),
         });
+
+        if dialect == Dialect::Standard {
+            if let Some(schema_match) = discover_custom_schema(&canonical_path)? {
+                let builtins = load_custom_builtins(&schema_match.builtins_path)?;
+                self.analysis
+                    .set_custom_builtin_defs(schema_match.schema_id.clone(), builtins);
+                info = Some(FileInfo::Custom {
+                    schema: schema_match.schema_id,
+                });
+            }
+        }
 
         let file_id = self.interner.intern_path(canonical_path);
         change.create_file(file_id, dialect, info, contents.clone());

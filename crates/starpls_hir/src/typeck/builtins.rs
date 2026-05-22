@@ -64,6 +64,8 @@ pub(crate) struct BuiltinTypes {
 pub(crate) struct BuiltinType {
     pub(crate) name: Name,
     #[return_ref]
+    pub(crate) schema_id: Option<String>,
+    #[return_ref]
     pub(crate) fields: Vec<BuiltinField>,
     #[return_ref]
     pub(crate) methods: Vec<BuiltinFunction>,
@@ -106,6 +108,18 @@ impl APIGlobals {
     where
         I: Iterator<Item = &'a Value>,
     {
+        Self::from_values_with_schema(db, providers, values, None)
+    }
+
+    fn from_values_with_schema<'a, I>(
+        db: &dyn Db,
+        providers: BuiltinProviders,
+        values: I,
+        schema_id: Option<&str>,
+    ) -> Self
+    where
+        I: Iterator<Item = &'a Value>,
+    {
         let mut functions = FxHashMap::default();
         let mut variables = FxHashMap::default();
         let providers = providers.providers(db);
@@ -124,7 +138,7 @@ impl APIGlobals {
                 (None, Some(callable)) => {
                     functions.insert(
                         value.name.clone(),
-                        builtin_function(db, &value.name, callable, &value.doc, None),
+                        builtin_function(db, &value.name, callable, &value.doc, None, schema_id),
                     );
                 }
                 (None, None) => {
@@ -143,6 +157,8 @@ impl APIGlobals {
 #[salsa::tracked]
 pub(crate) struct BuiltinFunction {
     pub(crate) name: Name,
+    #[return_ref]
+    pub(crate) schema_id: Option<String>,
     #[return_ref]
     pub(crate) parent_type: Option<String>,
     #[return_ref]
@@ -620,6 +636,8 @@ pub(crate) struct BuiltinProviders {
 #[salsa::input]
 pub struct BuiltinDefs {
     #[return_ref]
+    pub schema_id: Option<String>,
+    #[return_ref]
     pub builtins: Builtins,
     #[return_ref]
     pub rules: Builtins,
@@ -664,6 +682,11 @@ pub(crate) fn builtin_globals(db: &dyn Db, dialect: Dialect) -> BuiltinGlobals {
     builtin_globals_query(db, defs)
 }
 
+pub(crate) fn custom_builtin_globals(db: &dyn Db, schema_id: &str) -> Option<APIGlobals> {
+    let defs = db.get_custom_builtin_defs(schema_id)?;
+    Some(custom_builtin_globals_query(db, defs))
+}
+
 #[salsa::tracked]
 pub(crate) fn builtin_globals_query(db: &dyn Db, defs: BuiltinDefs) -> BuiltinGlobals {
     let builtins = defs.builtins(db);
@@ -705,16 +728,43 @@ pub(crate) fn builtin_globals_query(db: &dyn Db, defs: BuiltinDefs) -> BuiltinGl
     )
 }
 
+#[salsa::tracked]
+pub(crate) fn custom_builtin_globals_query(db: &dyn Db, defs: BuiltinDefs) -> APIGlobals {
+    let providers = builtin_providers_query(db, defs);
+    let schema_id = defs.schema_id(db);
+    APIGlobals::from_values_with_schema(
+        db,
+        providers,
+        defs.builtins(db).global.iter(),
+        schema_id.as_deref(),
+    )
+}
+
 pub(crate) fn builtin_types(db: &dyn Db, dialect: Dialect) -> BuiltinTypes {
     let defs = db.get_builtin_defs(&dialect);
     builtin_types_query(db, defs)
 }
 
+pub(crate) fn custom_builtin_types(db: &dyn Db, schema_id: &str) -> Option<BuiltinTypes> {
+    let defs = db.get_custom_builtin_defs(schema_id)?;
+    Some(custom_builtin_types_query(db, defs))
+}
+
 #[salsa::tracked]
 pub(crate) fn builtin_types_query(db: &dyn Db, defs: BuiltinDefs) -> BuiltinTypes {
+    builtin_types_query_inner(db, defs)
+}
+
+#[salsa::tracked]
+pub(crate) fn custom_builtin_types_query(db: &dyn Db, defs: BuiltinDefs) -> BuiltinTypes {
+    builtin_types_query_inner(db, defs)
+}
+
+fn builtin_types_query_inner(db: &dyn Db, defs: BuiltinDefs) -> BuiltinTypes {
     let mut types = FxHashMap::default();
     let builtins = defs.builtins(db);
     let rules = defs.rules(db);
+    let schema_id = defs.schema_id(db);
     let mut missing_module_members = env::make_missing_module_members();
     let providers = builtin_providers_query(db, defs).providers(db);
 
@@ -765,6 +815,7 @@ pub(crate) fn builtin_types_query(db: &dyn Db, defs: BuiltinDefs) -> BuiltinType
                         callable,
                         &rule.doc,
                         Some(&type_.name),
+                        schema_id.as_deref(),
                     ));
                 }
             }
@@ -794,6 +845,7 @@ pub(crate) fn builtin_types_query(db: &dyn Db, defs: BuiltinDefs) -> BuiltinType
                                 callable,
                                 &field.doc,
                                 Some(&type_.name),
+                                schema_id.as_deref(),
                             ));
                         }
                     }
@@ -831,6 +883,7 @@ pub(crate) fn builtin_types_query(db: &dyn Db, defs: BuiltinDefs) -> BuiltinType
                 BuiltinType::new(
                     db,
                     Name::from_str(&type_.name),
+                    schema_id.clone(),
                     fields,
                     methods,
                     normalize_doc_text(&type_.doc),
@@ -851,6 +904,7 @@ fn builtin_function(
     callable: &Callable,
     doc: &str,
     parent_name: Option<&str>,
+    schema_id: Option<&str>,
 ) -> BuiltinFunction {
     // Apply overrides for function return types known to be incorrect. For now, this
     // consists only of the `Label()` constructor.
@@ -862,6 +916,7 @@ fn builtin_function(
     BuiltinFunction::new(
         db,
         Name::from_str(name),
+        schema_id.map(ToOwned::to_owned),
         parent_name.map(|parent_name| parent_name.to_string()),
         callable.param.iter().map(builtin_param).collect(),
         parse_type_ref(ret_type_ref),

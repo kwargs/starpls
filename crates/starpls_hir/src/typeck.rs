@@ -34,6 +34,7 @@ use crate::module;
 use crate::source_map;
 use crate::typeck::builtins::builtin_types;
 use crate::typeck::builtins::common_attributes_query;
+use crate::typeck::builtins::custom_builtin_types;
 use crate::typeck::builtins::BuiltinFunction;
 use crate::typeck::builtins::BuiltinFunctionParam;
 use crate::typeck::builtins::BuiltinProvider;
@@ -272,7 +273,12 @@ impl Ty {
                     .iter()
                     .enumerate()
                     .map(move |(index, field)| {
-                        let resolved = resolve_builtin_type_ref(db, &field.type_ref).0;
+                        let resolved = resolve_builtin_type_ref_for_schema(
+                            db,
+                            ty.schema_id(db).as_deref(),
+                            &field.type_ref,
+                        )
+                        .0;
                         let resolved = match (resolved.kind(), data) {
                             // If `TyData` is set, this means the current type is either `ctx` or `repository_ctx`.
                             // Override the `attr` field for both of these types.
@@ -462,7 +468,11 @@ impl Ty {
             }
             TyKind::BuiltinFunction(func) => {
                 Params::Builtin(func.params(db).iter().enumerate().map(|(index, param)| {
-                    let ty = resolve_builtin_type_ref_opt(db, param.type_ref());
+                    let ty = resolve_builtin_type_ref_opt_for_schema(
+                        db,
+                        func.schema_id(db).as_deref(),
+                        param.type_ref(),
+                    );
                     let ty = match param {
                         BuiltinFunctionParam::Simple { .. } => ty,
                         BuiltinFunctionParam::ArgsList { .. } => {
@@ -609,7 +619,14 @@ impl Ty {
         Some(match self.kind() {
             TyKind::Function(def) => resolve_builtin_type_ref_opt(db, def.func().ret_type_ref(db)),
             TyKind::IntrinsicFunction(func, subst) => func.ret_ty(db).substitute(&subst.args),
-            TyKind::BuiltinFunction(func) => resolve_builtin_type_ref(db, func.ret_type_ref(db)).0,
+            TyKind::BuiltinFunction(func) => {
+                resolve_builtin_type_ref_for_schema(
+                    db,
+                    func.schema_id(db).as_deref(),
+                    func.ret_type_ref(db),
+                )
+                .0
+            }
             TyKind::Provider(provider) | TyKind::ProviderRawConstructor(_, provider) => {
                 TyKind::ProviderInstance(provider.clone()).intern()
             }
@@ -1774,6 +1791,7 @@ pub struct TyContext<'a> {
 struct TypeRefResolver<'a, 'b> {
     db: &'a dyn Db,
     context: Option<(&'a mut TyContext<'b>, InFile<StmtId>)>,
+    schema_id: Option<String>,
     errors: Vec<String>,
 }
 
@@ -1836,19 +1854,38 @@ impl<'a, 'b> TypeRefResolver<'a, 'b> {
 
     fn resolve_path<'c>(
         &mut self,
-        mut segments: impl Iterator<Item = &'c Name>,
+        segments: impl Iterator<Item = &'c Name>,
         args: &Option<Box<[TypeRef]>>,
     ) -> Ty {
         let types = intrinsic_types(self.db).types(self.db);
-        let builtin_types = builtin_types(self.db, Dialect::Bazel);
-        let name = match segments.next() {
+        let schema_id = self.schema_id.clone().or_else(|| {
+            self.context
+                .as_ref()
+                .and_then(|(_, usage)| usage.file.custom_schema(self.db))
+        });
+        let builtin_types = schema_id
+            .as_deref()
+            .and_then(|schema_id| custom_builtin_types(self.db, schema_id))
+            .unwrap_or_else(|| builtin_types(self.db, Dialect::Bazel));
+        let segments = segments.collect::<Vec<_>>();
+        let name = match segments.first() {
             Some(name) => name,
             None => return types.unknown.clone(),
         };
 
-        if let Some(next) = segments.next() {
+        if segments.len() > 1 {
+            let builtin_name = segments
+                .iter()
+                .map(|segment| segment.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            if let Some(ty) = builtin_types.types(self.db).get(&builtin_name).cloned() {
+                return ty;
+            }
+            let mut rest = segments[1..].iter().copied();
+            let next = rest.next().expect("segments has at least two elements");
             return self
-                .resolve_segments(self.db, name, next, segments)
+                .resolve_segments(self.db, name, next, rest)
                 .unwrap_or_else(|| types.unknown.clone());
         }
 
@@ -1968,6 +2005,7 @@ pub(crate) fn resolve_type_ref(
     TypeRefResolver {
         db: tcx.db,
         context: usage.map(|usage| (tcx, usage)),
+        schema_id: None,
         errors: vec![],
     }
     .resolve_type_ref(type_ref)
@@ -1984,17 +2022,34 @@ pub(crate) fn resolve_type_ref_opt(
 }
 
 pub(crate) fn resolve_builtin_type_ref(db: &dyn Db, type_ref: &TypeRef) -> (Ty, Vec<String>) {
+    resolve_builtin_type_ref_for_schema(db, None, type_ref)
+}
+
+pub(crate) fn resolve_builtin_type_ref_for_schema(
+    db: &dyn Db,
+    schema_id: Option<&str>,
+    type_ref: &TypeRef,
+) -> (Ty, Vec<String>) {
     TypeRefResolver {
         db,
         context: None,
+        schema_id: schema_id.map(ToOwned::to_owned),
         errors: vec![],
     }
     .resolve_type_ref(type_ref)
 }
 
 pub(crate) fn resolve_builtin_type_ref_opt(db: &dyn Db, type_ref: Option<TypeRef>) -> Ty {
+    resolve_builtin_type_ref_opt_for_schema(db, None, type_ref)
+}
+
+pub(crate) fn resolve_builtin_type_ref_opt_for_schema(
+    db: &dyn Db,
+    schema_id: Option<&str>,
+    type_ref: Option<TypeRef>,
+) -> Ty {
     type_ref
-        .map(|type_ref| resolve_builtin_type_ref(db, &type_ref).0)
+        .map(|type_ref| resolve_builtin_type_ref_for_schema(db, schema_id, &type_ref).0)
         .unwrap_or_else(Ty::unknown)
 }
 

@@ -20,6 +20,7 @@ use crate::def::ExprId;
 use crate::def::ModuleSourceMap;
 use crate::source_map;
 use crate::typeck::builtins::builtin_globals;
+use crate::typeck::builtins::custom_builtin_globals;
 use crate::typeck::builtins::APIGlobals;
 use crate::typeck::intrinsics::intrinsic_functions;
 use crate::Db;
@@ -39,6 +40,33 @@ pub(crate) struct Resolver<'a> {
 pub(crate) enum Export {
     Variable(VariableDef),
     Function(FunctionDef),
+}
+
+fn resolve_in_api_globals(api_globals: &APIGlobals, name: &Name) -> Option<ScopeDef> {
+    api_globals
+        .functions
+        .get(name.as_str())
+        .copied()
+        .map(ScopeDef::BuiltinFunction)
+        .or_else(|| {
+            api_globals
+                .variables
+                .get(name.as_str())
+                .cloned()
+                .map(ScopeDef::BuiltinVariable)
+        })
+}
+
+fn add_api_globals_to_names(names: &mut FxHashMap<Name, ScopeDef>, api_globals: &APIGlobals) {
+    for (name, func) in api_globals.functions.iter() {
+        names.insert(Name::from_str(name), ScopeDef::BuiltinFunction(*func));
+    }
+    for (name, type_ref) in api_globals.variables.iter() {
+        names.insert(
+            Name::from_str(name),
+            ScopeDef::BuiltinVariable(type_ref.clone()),
+        );
+    }
 }
 
 impl From<Export> for ScopeDef {
@@ -146,39 +174,30 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_name_in_builtin_globals(&self, name: &Name) -> Option<ScopeDef> {
+        if let Some(schema_id) = self.file.custom_schema(self.db) {
+            return custom_builtin_globals(self.db, &schema_id)
+                .and_then(|globals| resolve_in_api_globals(&globals, name));
+        }
+
         let api_context = self.file.api_context(self.db)?;
         let globals = builtin_globals(self.db, self.file.dialect(self.db));
-        let resolve_in_api_globals = |api_globals: &APIGlobals| {
-            api_globals
-                .functions
-                .get(name.as_str())
-                .copied()
-                .map(ScopeDef::BuiltinFunction)
-                .or_else(|| {
-                    api_globals
-                        .variables
-                        .get(name.as_str())
-                        .cloned()
-                        .map(ScopeDef::BuiltinVariable)
-                })
-        };
 
         if api_context == APIContext::Repo {
-            return resolve_in_api_globals(globals.repo_globals(self.db));
+            return resolve_in_api_globals(globals.repo_globals(self.db), name);
         }
         if api_context == APIContext::Cquery {
-            return resolve_in_api_globals(globals.cquery_globals(self.db));
+            return resolve_in_api_globals(globals.cquery_globals(self.db), name);
         }
-        resolve_in_api_globals(globals.bzl_globals(self.db)).or_else(|| match api_context {
-            APIContext::Module => resolve_in_api_globals(globals.bzlmod_globals(self.db)),
-            APIContext::Workspace => resolve_in_api_globals(globals.workspace_globals(self.db)),
+        resolve_in_api_globals(globals.bzl_globals(self.db), name).or_else(|| match api_context {
+            APIContext::Module => resolve_in_api_globals(globals.bzlmod_globals(self.db), name),
+            APIContext::Workspace => {
+                resolve_in_api_globals(globals.workspace_globals(self.db), name)
+            }
             _ => None,
         })
     }
 
     pub(crate) fn names(&self) -> FxHashMap<Name, ScopeDef> {
-        let builtin_globals = builtin_globals(self.db, self.file.dialect(self.db));
-
         // Add names from this module.
         let mut names = self.module_names();
 
@@ -187,6 +206,14 @@ impl<'a> Resolver<'a> {
             names.insert(key.clone(), ScopeDef::IntrinsicFunction(*func));
         }
 
+        if let Some(schema_id) = self.file.custom_schema(self.db) {
+            if let Some(custom_globals) = custom_builtin_globals(self.db, &schema_id) {
+                add_api_globals_to_names(&mut names, &custom_globals);
+            }
+            return names;
+        }
+
+        let builtin_globals = builtin_globals(self.db, self.file.dialect(self.db));
         let api_context = match self.file.api_context(self.db) {
             Some(api_context) => api_context,
             None => return names,
@@ -217,29 +244,21 @@ impl<'a> Resolver<'a> {
         }
 
         // Add names from builtins, taking the current Bazel API context into account.
-        let mut add_builtins = |api_globals: &APIGlobals| {
-            for (name, func) in api_globals.functions.iter() {
-                names.insert(Name::from_str(name), ScopeDef::BuiltinFunction(*func));
-            }
-            for (name, type_ref) in api_globals.variables.iter() {
-                names.insert(
-                    Name::from_str(name),
-                    ScopeDef::BuiltinVariable(type_ref.clone()),
-                );
-            }
-        };
-
         if api_context == APIContext::Repo {
-            add_builtins(builtin_globals.repo_globals(self.db));
+            add_api_globals_to_names(&mut names, builtin_globals.repo_globals(self.db));
         } else if api_context == APIContext::Cquery {
-            add_builtins(builtin_globals.cquery_globals(self.db));
+            add_api_globals_to_names(&mut names, builtin_globals.cquery_globals(self.db));
         } else if api_context == APIContext::Vendor {
-            add_builtins(builtin_globals.vendor_globals(self.db));
+            add_api_globals_to_names(&mut names, builtin_globals.vendor_globals(self.db));
         } else {
-            add_builtins(builtin_globals.bzl_globals(self.db));
+            add_api_globals_to_names(&mut names, builtin_globals.bzl_globals(self.db));
             match api_context {
-                APIContext::Module => add_builtins(builtin_globals.bzlmod_globals(self.db)),
-                APIContext::Workspace => add_builtins(builtin_globals.workspace_globals(self.db)),
+                APIContext::Module => {
+                    add_api_globals_to_names(&mut names, builtin_globals.bzlmod_globals(self.db))
+                }
+                APIContext::Workspace => {
+                    add_api_globals_to_names(&mut names, builtin_globals.workspace_globals(self.db))
+                }
                 _ => {}
             }
         }

@@ -28,6 +28,7 @@ use crate::InferenceOptions;
 #[salsa::db(starpls_common::Jar, crate::Jar)]
 pub(crate) struct TestDatabase {
     builtin_defs: Arc<DashMap<Dialect, BuiltinDefs>>,
+    custom_builtin_defs: Arc<DashMap<String, BuiltinDefs>>,
     storage: salsa::Storage<Self>,
     files: Arc<DashMap<FileId, File>>,
     prelude_file: Option<FileId>,
@@ -102,7 +103,7 @@ impl crate::Db for TestDatabase {
         let defs = match self.builtin_defs.entry(dialect) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
-                entry.insert(BuiltinDefs::new(self, builtins, rules));
+                entry.insert(BuiltinDefs::new(self, None, builtins, rules));
                 return;
             }
         };
@@ -115,9 +116,31 @@ impl crate::Db for TestDatabase {
             .map(|defs| *defs)
             .unwrap_or(BuiltinDefs::new(
                 self,
+                None,
                 Builtins::default(),
                 Builtins::default(),
             ))
+    }
+
+    fn set_custom_builtin_defs(&mut self, schema_id: String, builtins: Builtins) {
+        let schema_id_for_defs = schema_id.clone();
+        let defs = match self.custom_builtin_defs.entry(schema_id) {
+            Entry::Occupied(entry) => *entry.get(),
+            Entry::Vacant(entry) => {
+                entry.insert(BuiltinDefs::new(
+                    self,
+                    Some(schema_id_for_defs),
+                    builtins,
+                    Builtins::default(),
+                ));
+                return;
+            }
+        };
+        defs.set_builtins(self).to(builtins);
+    }
+
+    fn get_custom_builtin_defs(&self, schema_id: &str) -> Option<BuiltinDefs> {
+        self.custom_builtin_defs.get(schema_id).map(|defs| *defs)
     }
 
     fn set_bazel_prelude_file(&mut self, file_id: FileId) {

@@ -56,6 +56,8 @@ use crate::typeck::call::Slots;
 use crate::typeck::intrinsics::IntrinsicFunctionParam;
 use crate::typeck::intrinsics::IntrinsicTypes;
 use crate::typeck::resolve_builtin_type_ref;
+use crate::typeck::resolve_builtin_type_ref_for_schema;
+use crate::typeck::resolve_builtin_type_ref_opt_for_schema;
 use crate::typeck::resolve_type_ref;
 use crate::typeck::resolve_type_ref_opt;
 use crate::typeck::CodeFlowCacheKey;
@@ -866,7 +868,11 @@ impl TyContext<'_> {
 
                         // Validate argument types.
                         for (param, slot) in params.iter().zip(slots.slots) {
-                            let param_ty = resolve_type_ref_opt(self, param.type_ref(), None);
+                            let param_ty = resolve_builtin_type_ref_opt_for_schema(
+                                db,
+                                func.schema_id(db).as_deref(),
+                                param.type_ref(),
+                            );
                             let mut validate_provider = |provider| match provider {
                                 SlotProvider::Missing => {
                                     if param.is_mandatory() {
@@ -913,7 +919,12 @@ impl TyContext<'_> {
 
                         func.maybe_unique_ret_type(self, file, expr, args_with_ty)
                             .unwrap_or_else(|| {
-                                resolve_type_ref(self, func.ret_type_ref(db), None).0
+                                resolve_builtin_type_ref_for_schema(
+                                    db,
+                                    func.schema_id(db).as_deref(),
+                                    func.ret_type_ref(db),
+                                )
+                                .0
                             })
                     }
                     TyKind::Rule(rule) => {
@@ -1579,7 +1590,12 @@ impl TyContext<'_> {
                     }
                     ScopeDef::BuiltinFunction(func) => TyKind::BuiltinFunction(func).intern(),
                     ScopeDef::BuiltinVariable(type_ref) => {
-                        resolve_builtin_type_ref(self.db, &type_ref).0
+                        resolve_builtin_type_ref_for_schema(
+                            self.db,
+                            file.custom_schema(self.db).as_deref(),
+                            &type_ref,
+                        )
+                        .0
                     }
                     // Handle symbols declared/loaded in the prelude file.
                     ScopeDef::Variable(def) => self.infer_expr(def.file, def.expr),
