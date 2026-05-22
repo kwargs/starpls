@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, for example v0.1.23"
+        required: true
+        type: string
 
 jobs:
   build:
@@ -23,7 +29,9 @@ jobs:
       fail-fast: true
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Prepare for build
         run: |
           bazel/setup-ci.sh
@@ -41,11 +49,15 @@ jobs:
     name: Build (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Prepare for build
         run: |
-          echo 'import %workspace%/bazel/remote-cache.bazelrc' >>.bazelrc
-          echo "build --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY" >>.bazelrc
+          if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
+            echo 'import %workspace%/bazel/remote-cache.bazelrc' >>.bazelrc
+            echo "build --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY" >>.bazelrc
+          fi
           echo "startup --output_user_root=C:/b" >>.bazelrc
           echo "startup --windows_enable_symlinks" >>.bazelrc
           mkdir -p editors/code/dist
@@ -93,6 +105,7 @@ jobs:
         run: find release
       - name: Create release
         run: |
-          gh release create ${{ github.ref_name }} release/*
+          gh release create "$RELEASE_TAG" release/* --title "$RELEASE_TAG" --generate-notes --verify-tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
