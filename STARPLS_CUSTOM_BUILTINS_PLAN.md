@@ -124,6 +124,9 @@ runtime-specific types:
 The schema shape intentionally stays close to Bazel's existing `Builtins`
 model so `starpls` can deserialize it into the same internal representation.
 
+See [Custom Builtins](docs/custom-builtins.md) for the practical manifest and
+schema stub guide.
+
 ## Accepted MVP Decisions
 
 - Manifest discovery uses the nearest ancestor `.starpls.json`, walking upward

@@ -85,6 +85,10 @@ def _impl(ctx):
 
 then you'll get autocomplete suggestions for the attributes on `ctx`, like `ctx.actions`, `ctx.attr`, and so on!
 
+For non-Bazel Starlark runtimes, projects can provide repo-local custom
+builtins with `.starpls.json` and a matching schema file. See
+[Custom Builtins](docs/custom-builtins.md).
+
 ## Experimental features
 
 Starpls has a number of experimental features that can be enabled via command-line arguments:
