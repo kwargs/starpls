@@ -77,18 +77,34 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - name: Download linux aarch64 artifact
+        uses: actions/download-artifact@v4
         with:
-          path: artifacts
-          pattern: starpls-*
+          name: starpls-linux-aarch64
+          path: artifacts/linux-aarch64
+      - name: Download linux amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: starpls-linux-amd64
+          path: artifacts/linux-amd64
+      - name: Download macOS arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: starpls-darwin-arm64
+          path: artifacts/darwin-arm64
+      - name: Download Windows amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: starpls-windows-amd64
+          path: artifacts/windows-amd64
       - name: Prepare release artifacts
         run: |
           mkdir -p release
 
-          install -m 0755 "$(find artifacts/starpls-linux-aarch64 -type f -name starpls | head -n 1)" release/starpls-linux-aarch64
-          install -m 0755 "$(find artifacts/starpls-linux-amd64 -type f -name starpls | head -n 1)" release/starpls-linux-amd64
-          install -m 0755 "$(find artifacts/starpls-darwin-arm64 -type f -name starpls | head -n 1)" release/starpls-darwin-arm64
-          install -m 0755 "$(find artifacts/starpls-windows-amd64 -type f -name starpls.exe | head -n 1)" release/starpls-windows-amd64.exe
+          install -m 0755 "$(find artifacts/linux-aarch64 -type f -name starpls -print -quit)" release/starpls-linux-aarch64
+          install -m 0755 "$(find artifacts/linux-amd64 -type f -name starpls -print -quit)" release/starpls-linux-amd64
+          install -m 0755 "$(find artifacts/darwin-arm64 -type f -name starpls -print -quit)" release/starpls-darwin-arm64
+          install -m 0755 "$(find artifacts/windows-amd64 -type f -name starpls.exe -print -quit)" release/starpls-windows-amd64.exe
           chmod +x release/starpls-*
 
           # Also create archives for usage by installation methods like Homebrew.
