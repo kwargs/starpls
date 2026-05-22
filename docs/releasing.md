@@ -24,14 +24,14 @@ git merge --ff-only codex/custom-builtins
 Choose the next fork prerelease version and matching tag:
 
 ```sh
-git tag v0.1.23-kwargs.4
+git tag v0.1.23-kwargs.5
 git push origin main
-git push origin v0.1.23-kwargs.4
+git push origin v0.1.23-kwargs.5
 ```
 
 Pushing the `v*` tag starts `.github/workflows/release.yml`. The workflow builds
-Linux, macOS arm64, and Windows binaries, creates archives for install tools,
-and publishes a GitHub release with generated release notes.
+Linux and macOS arm64 binaries, creates archives for install tools, and
+publishes a GitHub release with generated release notes.
 
 ## Re-run a Release
 
@@ -39,7 +39,7 @@ If the tag exists but the release job needs to be retried, use the manual
 `Release` workflow in GitHub Actions and pass the existing tag, for example:
 
 ```text
-v0.1.23-kwargs.4
+v0.1.23-kwargs.5
 ```
 
 The workflow checks out that tag and runs:
