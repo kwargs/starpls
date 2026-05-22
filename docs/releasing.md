@@ -30,8 +30,8 @@ git push origin v0.1.23-kwargs.1
 ```
 
 Pushing the `v*` tag starts `.github/workflows/release.yml`. The workflow builds
-Linux, macOS, and Windows binaries, creates archives for install tools, and
-publishes a GitHub release with generated release notes.
+Linux, macOS arm64, and Windows binaries, creates archives for install tools,
+and publishes a GitHub release with generated release notes.
 
 ## Re-run a Release
 
