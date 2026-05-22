@@ -7,6 +7,8 @@ mod bazel;
 mod commands;
 mod config;
 mod convert;
+#[cfg(test)]
+mod custom_builtins;
 mod debouncer;
 mod diagnostics;
 mod dispatcher;
