@@ -12,8 +12,12 @@ pub use crate::label::ParseError;
 pub mod attr;
 pub mod build_language;
 pub mod client;
+mod custom_builtins;
 pub mod env;
 pub mod label;
+
+pub use custom_builtins::decode_custom_builtins_json;
+pub use custom_builtins::load_custom_builtins;
 
 #[cfg(bazel)]
 pub mod builtin {
