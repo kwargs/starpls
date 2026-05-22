@@ -84,10 +84,11 @@ jobs:
       - name: Prepare release artifacts
         run: |
           mkdir -p release
-          mv artifacts/starpls-linux-aarch64/starpls release/starpls-linux-aarch64
-          mv artifacts/starpls-linux-amd64/starpls release/starpls-linux-amd64
-          mv artifacts/starpls-darwin-arm64/starpls release/starpls-darwin-arm64
-          mv artifacts/starpls-windows-amd64/starpls.exe release/starpls-windows-amd64.exe
+
+          install -m 0755 "$(find artifacts/starpls-linux-aarch64 -type f -name starpls | head -n 1)" release/starpls-linux-aarch64
+          install -m 0755 "$(find artifacts/starpls-linux-amd64 -type f -name starpls | head -n 1)" release/starpls-linux-amd64
+          install -m 0755 "$(find artifacts/starpls-darwin-arm64 -type f -name starpls | head -n 1)" release/starpls-darwin-arm64
+          install -m 0755 "$(find artifacts/starpls-windows-amd64 -type f -name starpls.exe | head -n 1)" release/starpls-windows-amd64.exe
           chmod +x release/starpls-*
 
           # Also create archives for usage by installation methods like Homebrew.
